@@ -9,3 +9,5 @@ fastembed
 httpx
 aiofiles
 python-dotenv
+pytube
+pydub
