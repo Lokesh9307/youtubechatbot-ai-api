@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.log
+*.mp3
+*.wav
+*.egg-info/
+.env
+.env.*
+*.sqlite3
+*.json
+*.tar
+.idea/
+.vscode/
+.DS_Store
+venv/
+env/

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+youtube-transcript-api
+llama-index
+faiss-cpu
+fastembed
+google-cloud-storage
+httpx
+aiofiles
+python-dotenv
