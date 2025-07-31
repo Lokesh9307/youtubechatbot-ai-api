@@ -1,5 +1,6 @@
 import os
 import requests
+import tempfile
 from urllib.parse import urlparse, parse_qs
 from pytube import YouTube
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -9,14 +10,15 @@ from utils.config import load_env
 # Load environment variables
 load_env()
 
-# Get API keys from environment
+# Get API keys
 SCRAPERAPI_KEY = os.getenv("SCRAPER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# Validate environment
 if not SCRAPERAPI_KEY:
-    raise ValueError("SCRAPER_API_KEY is not set in the environment.")
+    raise ValueError("SCRAPER_API_KEY is missing in environment.")
 if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is not set in the environment.")
+    raise ValueError("GROQ_API_KEY is missing in environment.")
 
 # Proxy configuration
 SCRAPERAPI_PROXY = {
@@ -26,25 +28,28 @@ SCRAPERAPI_PROXY = {
 
 
 def extract_video_id(url: str) -> str:
-    query = urlparse(url)
-    if query.hostname == 'youtu.be':
-        return query.path[1:]
-    if query.hostname in ('www.youtube.com', 'youtube.com'):
-        if query.path == '/watch':
-            return parse_qs(query.query).get('v', [None])[0]
-        elif query.path.startswith('/embed/') or query.path.startswith('/v/'):
-            return query.path.split('/')[2]
+    parsed_url = urlparse(url)
+    if parsed_url.hostname == 'youtu.be':
+        return parsed_url.path[1:]
+    if parsed_url.hostname in ('www.youtube.com', 'youtube.com'):
+        if parsed_url.path == '/watch':
+            return parse_qs(parsed_url.query).get('v', [None])[0]
+        elif parsed_url.path.startswith('/embed/') or parsed_url.path.startswith('/v/'):
+            return parsed_url.path.split('/')[2]
     raise ValueError("Invalid YouTube URL format.")
 
 
-def download_audio(url: str, output_path="temp_audio.mp3") -> str:
+def download_audio(url: str) -> str:
     try:
         yt = YouTube(url)
         audio_stream = yt.streams.filter(only_audio=True).first()
         if not audio_stream:
-            raise Exception("No audio stream found for the video.")
-        audio_stream.download(filename=output_path)
-        return output_path
+            raise Exception("No audio stream found.")
+        
+        # Use a temporary file to avoid overwrite or leftover issues
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        audio_stream.download(filename=temp_file.name)
+        return temp_file.name
     except Exception as e:
         raise Exception(f"Failed to download audio: {e}")
 
@@ -58,7 +63,7 @@ def transcribe_with_groq_whisper(audio_path: str) -> str:
                     "Authorization": f"Bearer {GROQ_API_KEY}"
                 },
                 files={
-                    "file": (audio_path, audio_file, "audio/mpeg")
+                    "file": (os.path.basename(audio_path), audio_file, "audio/mpeg")
                 },
                 data={
                     "model": "whisper-large-v3"
@@ -68,7 +73,7 @@ def transcribe_with_groq_whisper(audio_path: str) -> str:
         if response.status_code == 200:
             return response.json().get("text", "")
         else:
-            raise Exception(f"Whisper transcription failed: {response.status_code} - {response.text}")
+            raise Exception(f"Whisper failed: {response.status_code} - {response.text}")
 
     except Exception as e:
         raise Exception(f"Groq Whisper API error: {e}")
@@ -80,23 +85,21 @@ def get_transcript_from_url(url: str) -> str:
         transcript_list = YouTubeTranscriptApi.list(video_id, proxies=SCRAPERAPI_PROXY)
 
         try:
-            # Attempt to get English transcript
             transcript = transcript_list.find_transcript(['en'])
         except NoTranscriptFound:
-            # Fallback to any auto-generated language
             auto_langs = [t.language_code for t in transcript_list if t.is_generated]
             if not auto_langs:
-                raise NoTranscriptFound("No auto-generated transcripts found.")
+                raise NoTranscriptFound("No generated transcript found.")
             transcript = transcript_list.find_transcript(auto_langs)
 
-        transcript_text = " ".join([t.text for t in transcript.fetch()])
-        return transcript_text
+        return " ".join([entry.text for entry in transcript.fetch()])
 
     except (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable, Exception) as e:
-        print(f"[Fallback to Whisper] Transcript API failed: {e}")
+        print(f"[Fallback] Transcript failed, switching to Whisper: {e}")
+        audio_path = None
         try:
             audio_path = download_audio(url)
             return transcribe_with_groq_whisper(audio_path)
         finally:
-            if os.path.exists("temp_audio.mp3"):
-                os.remove("temp_audio.mp3")
+            if audio_path and os.path.exists(audio_path):
+                os.remove(audio_path)
