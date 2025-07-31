@@ -2,42 +2,30 @@ from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 from llama_index.embeddings.fastembed.base import FastEmbedEmbedding
 from llama_index.core import Settings
 from services.llmgroq import query_groq
-from google.cloud import storage
 import uuid
 import asyncio
 import os 
+import tempfile
+
 
 # settings for LLama_index for default error
 Settings.llm = None
 
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
-GCS_TEMP_FOLDER = os.getenv("GCS_TEMP_FOLDER")
-
 def build_index(transcript: str):
-    # Create a unique temp filename
     temp_filename = f"{uuid.uuid4()}.txt"
-    local_temp_path = f"/tmp/{temp_filename}"
+    local_temp_path = os.path.join(tempfile.gettempdir(), temp_filename)
 
-    # Save locally (you can skip this and upload directly from memory if needed)
-    # with open(local_temp_path, "w", encoding="utf-8") as f:
-    #     f.write(transcript)
+    try:
+        with open(local_temp_path, "w", encoding="utf-8") as f:
+            f.write(transcript)
 
-    # Upload to GCS
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(GCS_BUCKET_NAME)
-    blob = bucket.blob(f"{GCS_TEMP_FOLDER}/{temp_filename}")
-    blob.upload_from_filename(local_temp_path)
+        documents = SimpleDirectoryReader(input_files=[local_temp_path]).load_data()
+        embed_model = FastEmbedEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        index = VectorStoreIndex.from_documents(documents, embed_model=embed_model)
 
-    # Optional: Set metadata to auto-delete later
-    # (actual deletion is handled by lifecycle rule in bucket)
-
-    # Load document directly from local file before deleting it
-    documents = SimpleDirectoryReader(input_files=[local_temp_path]).load_data()
-    embed_model = FastEmbedEmbedding(model_name="BAAI/bge-small-en-v1.5")
-    index = VectorStoreIndex.from_documents(documents, embed_model=embed_model)
-
-    # Clean up local file
-    os.remove(local_temp_path)
+    finally:
+        if os.path.exists(local_temp_path):
+            os.remove(local_temp_path)
 
     return index
 

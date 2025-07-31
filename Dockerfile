@@ -2,10 +2,18 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install ffmpeg and other system dependencies
+RUN apt-get update && \
+    apt-get install -y ffmpeg git curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy app files
 COPY . .
 
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 EXPOSE 8080
 

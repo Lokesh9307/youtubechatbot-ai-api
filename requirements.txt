@@ -6,8 +6,6 @@ llama-index-embeddings-fastembed
 llama-index[fastembed]
 faiss-cpu
 fastembed
-google-cloud-storage
 httpx
 aiofiles
 python-dotenv
-yt-dlp
